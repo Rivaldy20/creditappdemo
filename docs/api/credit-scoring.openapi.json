@@ -1,0 +1,197 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Credit Scoring (UAT) — KreditKu Demo",
+    "description": "Simulasi scoring kredit untuk integrasi backend Java. Path default disesuaikan env `VITE_SCORING_PATH` (bawaan: `/api/v1/credit-scoring/simulate`).",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "{baseUrl}",
+      "variables": {
+        "baseUrl": {
+          "default": "http://localhost:8080",
+          "description": "Set `VITE_BACKEND_BASE_URL` di frontend"
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/api/v1/credit-scoring/simulate": {
+      "post": {
+        "operationId": "simulateCreditScoring",
+        "summary": "Hitung / simulasi skor kredit (kolektibilitas & komponen)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreditScoringRequest" },
+              "examples": {
+                "sample": {
+                  "summary": "Contoh payload dari frontend",
+                  "value": {
+                    "applicant": {
+                      "fullName": "Budi Santoso",
+                      "phone": "08123456789"
+                    },
+                    "financial": {
+                      "monthlyIncome": 8500000,
+                      "monthlyDebt": 2200000,
+                      "requestedLoanAmount": 40000000,
+                      "purpose": "modal_kerja"
+                    },
+                    "creditProfile": {
+                      "paymentHistory": "baik"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scoring berhasil",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreditScoringEnvelope" },
+                "examples": {
+                  "sample": {
+                    "summary": "Response yang diharapkan frontend",
+                    "value": {
+                      "traceId": "uat-1714275000000-ab12cd",
+                      "evaluatedAt": "2026-04-28T02:00:00.000Z",
+                      "result": {
+                        "kolektibilitas": 2,
+                        "kolektibilitasLabel": "Dalam Perhatian Khusus",
+                        "internalScore": 74,
+                        "breakdown": {
+                          "paymentHistory": 82,
+                          "income": 78,
+                          "debtToIncome": 68,
+                          "dtiRatio": 25.9
+                        },
+                        "recommendation": "Cukup baik: dapat diproses dengan monitoring dan verifikasi lanjutan."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Payload tidak valid",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "500": {
+            "description": "Kesalahan server",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreditScoringRequest": {
+        "type": "object",
+        "required": ["applicant", "financial", "creditProfile"],
+        "properties": {
+          "applicant": {
+            "type": "object",
+            "required": ["fullName", "phone"],
+            "properties": {
+              "fullName": { "type": "string", "example": "Budi Santoso" },
+              "phone": { "type": "string", "example": "08123456789" }
+            }
+          },
+          "financial": {
+            "type": "object",
+            "required": ["monthlyIncome", "monthlyDebt", "requestedLoanAmount", "purpose"],
+            "properties": {
+              "monthlyIncome": { "type": "number", "minimum": 0, "description": "Penghasilan bulanan (IDR)" },
+              "monthlyDebt": { "type": "number", "minimum": 0, "description": "Total cicilan/utang bulanan (IDR)" },
+              "requestedLoanAmount": { "type": "number", "minimum": 0, "description": "Plafon diajukan (IDR)" },
+              "purpose": {
+                "type": "string",
+                "enum": ["modal_kerja", "pendidikan", "renovasi", "lainnya"],
+                "description": "Tujuan pinjaman (nilai dari form frontend)"
+              }
+            }
+          },
+          "creditProfile": {
+            "type": "object",
+            "required": ["paymentHistory"],
+            "properties": {
+              "paymentHistory": {
+                "type": "string",
+                "enum": ["sangat_baik", "baik", "cukup", "buruk"],
+                "description": "Riwayat pembayaran (self-report di demo)"
+              }
+            }
+          }
+        }
+      },
+      "ScoreBreakdown": {
+        "type": "object",
+        "required": ["paymentHistory", "income", "debtToIncome"],
+        "properties": {
+          "paymentHistory": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "income": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "debtToIncome": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "dtiRatio": {
+            "type": ["number", "null"],
+            "description": "Persen cicilan terhadap penghasilan; null jika penghasilan 0"
+          }
+        }
+      },
+      "ScoreResult": {
+        "type": "object",
+        "required": [
+          "kolektibilitas",
+          "kolektibilitasLabel",
+          "internalScore",
+          "breakdown",
+          "recommendation"
+        ],
+        "properties": {
+          "kolektibilitas": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Simulasi kolektibilitas (edukasi)"
+          },
+          "kolektibilitasLabel": { "type": "string" },
+          "internalScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "breakdown": { "$ref": "#/components/schemas/ScoreBreakdown" },
+          "recommendation": { "type": "string" }
+        }
+      },
+      "CreditScoringEnvelope": {
+        "type": "object",
+        "required": ["traceId", "evaluatedAt", "result"],
+        "properties": {
+          "traceId": { "type": "string" },
+          "evaluatedAt": { "type": "string", "format": "date-time" },
+          "result": { "$ref": "#/components/schemas/ScoreResult" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "message": { "type": "string" },
+          "traceId": { "type": "string" }
+        }
+      }
+    }
+  }
+}

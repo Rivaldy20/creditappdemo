@@ -9,6 +9,18 @@ npm run dev
 
 Build: `npm run build`, preview: `npm run preview`.
 
+## Dokumentasi API & screenshot UI
+
+- Spesifikasi API (Markdown + OpenAPI JSON): folder [`docs/`](docs/README.md)
+- **Screenshot alur (dengan gambar):** [`docs/screenshots/README.md`](docs/screenshots/README.md)
+
+| Langkah | Cuplikan |
+|---------|----------|
+| Form | ![Form](docs/screenshots/01-form-pengajuan/creditapp1.png) |
+| Verifikasi | ![Verifikasi](docs/screenshots/02-verifikasi-dokumen/creditapp2.png) |
+| Loading | ![Loading](docs/screenshots/03-scoring-loading/creditapploading.png) |
+| Hasil | ![Hasil](docs/screenshots/04-hasil-scoring/creditapp4.png) |
+
 ## Credit Scoring API Mode
 
 Service scoring ada di `src/services/creditScoring.js` dan mendukung 2 mode:
