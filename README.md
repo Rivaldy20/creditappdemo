@@ -36,9 +36,14 @@ VITE_SCORING_MODE=mock
 VITE_SCORING_MODE=uat
 VITE_BACKEND_BASE_URL=http://localhost:8080
 VITE_SCORING_PATH=/api/v1/credit-scoring/simulate
+# Request JSON: aegira (snake_case, selaras Aegira Loan Service README) | kreditku (camelCase)
+VITE_SCORING_SCHEMA=aegira
+VITE_SCORING_DEFAULT_TENURE=12
 ```
 
-Contoh request JSON ke backend (mode `uat`):
+Referensi konvensi API (snake_case, DSR, loan flow): [Aegira Loan Service README](https://github.com/khalidalhabibie/aegira-loan-service/blob/master/README.md). Detail kontrak: [`docs/api/credit-scoring.md`](docs/api/credit-scoring.md).
+
+Contoh request JSON ke backend (mode `uat`, skema **`kreditku`** / camelCase — jika `VITE_SCORING_SCHEMA=aegira`, gunakan bentuk snake_case di [`docs/api/credit-scoring.md`](docs/api/credit-scoring.md)):
 
 ```json
 {

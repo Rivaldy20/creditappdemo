@@ -2,7 +2,19 @@
  * Scoring service layer (JSON API).
  * - mode "mock": hitung lokal untuk demo/dev.
  * - mode "uat": kirim request ke backend Java.
+ *
+ * Kontrak wire JSON mengikuti `VITE_SCORING_SCHEMA`:
+ * - `aegira` — snake_case nested (selaras pola Aegira Loan Service README)
+ * - `kreditku` — camelCase nested (legacy)
+ *
+ * @see https://github.com/khalidalhabibie/aegira-loan-service/blob/master/README.md
  */
+
+import {
+  buildScoringRequestBody,
+  normalizeScoringResponse,
+  getDefaultRequestedTenure,
+} from './scoringContract.js';
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 const SCORING_MODE = (import.meta.env.VITE_SCORING_MODE || 'mock').toLowerCase();
@@ -20,7 +32,19 @@ const BACKEND_SCORING_PATH = import.meta.env.VITE_SCORING_PATH || '/api/v1/credi
  *  loanAmount: number;
  *  purpose: string;
  *  paymentHistory: RiwayatPembayaran;
+ *  monthlyExpense?: number;
+ *  requestedTenure?: number;
  * }} CreditScoringInput
+ */
+
+/**
+ * @typedef {{
+ *  currentDsr: number | null;
+ *  projectedDsr: number | null;
+ *  riskLevel: string | null;
+ *  eligible: boolean | null;
+ *  monthlyInstallment: number | null;
+ * }} AegiraScoringMeta
  */
 
 /**
@@ -38,12 +62,57 @@ const BACKEND_SCORING_PATH = import.meta.env.VITE_SCORING_PATH || '/api/v1/credi
  *  source: 'mock' | 'uat-backend';
  *  traceId: string;
  *  evaluatedAt: string;
+ *  aegira: AegiraScoringMeta | null;
  * }} CreditScoringResponse
  */
 
 function makeTraceId(prefix) {
   const rand = Math.random().toString(36).slice(2, 8);
   return `${prefix}-${Date.now()}-${rand}`;
+}
+
+/**
+ * @param {number} kol
+ * @returns {string}
+ */
+function kolektibilitasToRiskLevel(kol) {
+  if (kol <= 1) return 'LOW';
+  if (kol === 2) return 'MEDIUM';
+  if (kol === 3) return 'MEDIUM';
+  if (kol === 4) return 'HIGH';
+  return 'HIGH';
+}
+
+/**
+ * @param {CreditScoringInput} input
+ * @param {{
+ *  kolektibilitas: number;
+ *  income: number;
+ *  debt: number;
+ * }} ctx
+ * @returns {AegiraScoringMeta}
+ */
+function buildMockAegiraMeta(input, ctx) {
+  const income = ctx.income;
+  const debt = ctx.debt;
+  const tenure = Number(input.requestedTenure) || getDefaultRequestedTenure();
+  const loanAmount = Number(input.loanAmount) || 0;
+  const newInstallment = tenure > 0 && loanAmount > 0 ? loanAmount / tenure : 0;
+
+  const currentDsr = income > 0 ? Math.round((debt / income) * 10000) / 100 : null;
+  const projectedDsr =
+    income > 0 ? Math.round(((debt + newInstallment) / income) * 10000) / 100 : null;
+
+  const kol = ctx.kolektibilitas;
+  const eligible = kol <= 2 ? true : kol === 3 ? false : false;
+
+  return {
+    currentDsr,
+    projectedDsr,
+    riskLevel: kolektibilitasToRiskLevel(kol),
+    eligible,
+    monthlyInstallment: newInstallment > 0 ? Math.round(newInstallment) : null,
+  };
 }
 
 /**
@@ -59,73 +128,10 @@ export async function scoreCreditApplication(input) {
 }
 
 /**
- * Contract JSON request untuk backend Java (UAT).
  * @param {CreditScoringInput} input
  */
-function toBackendPayload(input) {
-  return {
-    applicant: {
-      fullName: input.fullName,
-      phone: input.phone,
-    },
-    financial: {
-      monthlyIncome: Number(input.monthlyIncome) || 0,
-      monthlyDebt: Number(input.monthlyDebt) || 0,
-      requestedLoanAmount: Number(input.loanAmount) || 0,
-      purpose: input.purpose,
-    },
-    creditProfile: {
-      paymentHistory: input.paymentHistory,
-    },
-  };
-}
-
-/**
- * Adapter response backend Java -> shape frontend.
- * Diharapkan backend kirim JSON:
- * {
- *   "traceId": "....",
- *   "evaluatedAt": "2026-04-28T02:00:00.000Z",
- *   "result": {
- *     "kolektibilitas": 2,
- *     "kolektibilitasLabel": "Dalam Perhatian Khusus",
- *     "internalScore": 74,
- *     "breakdown": {...},
- *     "recommendation": "..."
- *   }
- * }
- */
-function fromBackendResponse(data) {
-  const result = data?.result || {};
-  return {
-    kolektibilitas: Number(result.kolektibilitas) || 5,
-    kolektibilitasLabel: String(result.kolektibilitasLabel || 'Macet'),
-    internalScore: Number(result.internalScore) || 0,
-    breakdown: {
-      paymentHistory: Number(result.breakdown?.paymentHistory) || 0,
-      income: Number(result.breakdown?.income) || 0,
-      debtToIncome: Number(result.breakdown?.debtToIncome) || 0,
-      dtiRatio:
-        result.breakdown?.dtiRatio == null
-          ? null
-          : Number(result.breakdown.dtiRatio),
-    },
-    recommendation: String(result.recommendation || 'Tidak ada rekomendasi dari backend.'),
-    source: 'uat-backend',
-    traceId: String(data?.traceId || makeTraceId('uat')),
-    evaluatedAt: String(data?.evaluatedAt || new Date().toISOString()),
-  };
-}
-
-/**
- * UAT integration ke backend Java.
- * Env:
- * - VITE_SCORING_MODE=uat
- * - VITE_BACKEND_BASE_URL=http://host:port
- * - VITE_SCORING_PATH=/api/v1/credit-scoring/simulate
- */
 async function callUatBackend(input) {
-  const payload = toBackendPayload(input);
+  const payload = buildScoringRequestBody(input);
   const url = `${BACKEND_BASE_URL}${BACKEND_SCORING_PATH}`;
 
   const res = await fetch(url, {
@@ -143,12 +149,24 @@ async function callUatBackend(input) {
   }
 
   const json = await res.json();
-  return fromBackendResponse(json);
+  const normalized = normalizeScoringResponse(json);
+
+  return {
+    kolektibilitas: normalized.kolektibilitas,
+    kolektibilitasLabel: normalized.kolektibilitasLabel,
+    internalScore: normalized.internalScore,
+    breakdown: normalized.breakdown,
+    recommendation:
+      normalized.recommendation || 'Tidak ada rekomendasi dari backend.',
+    source: 'uat-backend',
+    traceId: normalized.traceId || makeTraceId('uat'),
+    evaluatedAt: normalized.evaluatedAt || new Date().toISOString(),
+    aegira: normalized.aegira,
+  };
 }
 
 /**
  * MOCK implementation (offline/dev).
- * Tetap mempertahankan formula simulasi SLIK OJK.
  * @param {CreditScoringInput} input
  * @returns {Promise<CreditScoringResponse>}
  */
@@ -186,7 +204,8 @@ async function scoreWithMock(input) {
 
   let kolektibilitas = 5;
   let kolektibilitasLabel = 'Macet';
-  let recommendation = 'Risiko tinggi: perlu perbaikan riwayat pembayaran dan rasio utang sebelum diproses.';
+  let recommendation =
+    'Risiko tinggi: perlu perbaikan riwayat pembayaran dan rasio utang sebelum diproses.';
 
   if (internalScore >= 85) {
     kolektibilitas = 1;
@@ -195,16 +214,25 @@ async function scoreWithMock(input) {
   } else if (internalScore >= 72) {
     kolektibilitas = 2;
     kolektibilitasLabel = 'Dalam Perhatian Khusus';
-    recommendation = 'Cukup baik: dapat diproses dengan monitoring dan verifikasi lanjutan.';
+    recommendation =
+      'Cukup baik: dapat diproses dengan monitoring dan verifikasi lanjutan.';
   } else if (internalScore >= 58) {
     kolektibilitas = 3;
     kolektibilitasLabel = 'Kurang Lancar';
-    recommendation = 'Perlu mitigasi: pertimbangkan plafon lebih rendah atau tenor lebih pendek.';
+    recommendation =
+      'Perlu mitigasi: pertimbangkan plafon lebih rendah atau tenor lebih pendek.';
   } else if (internalScore >= 45) {
     kolektibilitas = 4;
     kolektibilitasLabel = 'Diragukan';
-    recommendation = 'Risiko tinggi: butuh dokumen tambahan dan analisis manual.';
+    recommendation =
+      'Risiko tinggi: butuh dokumen tambahan dan analisis manual.';
   }
+
+  const aegira = buildMockAegiraMeta(input, {
+    kolektibilitas,
+    income,
+    debt,
+  });
 
   return {
     kolektibilitas,
@@ -220,5 +248,6 @@ async function scoreWithMock(input) {
     source: 'mock',
     traceId: makeTraceId('mock'),
     evaluatedAt: new Date().toISOString(),
+    aegira,
   };
 }

@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Credit Scoring (UAT) — KreditKu Demo",
-    "description": "Simulasi scoring kredit untuk integrasi backend Java. Path default disesuaikan env `VITE_SCORING_PATH` (bawaan: `/api/v1/credit-scoring/simulate`).",
-    "version": "1.0.0"
+    "description": "Simulasi scoring untuk integrasi backend Java. **Request** mengikuti env `VITE_SCORING_SCHEMA`: `aegira` (snake_case, selaras pola [Aegira Loan Service](https://github.com/khalidalhabibie/aegira-loan-service/blob/master/README.md)) atau `kreditku` (camelCase legacy). Path: `VITE_SCORING_PATH` (default `/api/v1/credit-scoring/simulate`).",
+    "version": "1.1.0"
   },
   "servers": [
     {
@@ -11,7 +11,7 @@
       "variables": {
         "baseUrl": {
           "default": "http://localhost:8080",
-          "description": "Set `VITE_BACKEND_BASE_URL` di frontend"
+          "description": "Set `VITE_BACKEND_BASE_URL` di frontend (contoh: Aegira `http://localhost:8080`)"
         }
       }
     }
@@ -20,15 +20,40 @@
     "/api/v1/credit-scoring/simulate": {
       "post": {
         "operationId": "simulateCreditScoring",
-        "summary": "Hitung / simulasi skor kredit (kolektibilitas & komponen)",
+        "summary": "Hitung / simulasi skor kredit (kolektibilitas, breakdown, opsional DSR & eligibility)",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/CreditScoringRequest" },
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/CreditScoringRequestAegira" },
+                  { "$ref": "#/components/schemas/CreditScoringRequestKreditku" }
+                ]
+              },
               "examples": {
-                "sample": {
-                  "summary": "Contoh payload dari frontend",
+                "aegira": {
+                  "summary": "VITE_SCORING_SCHEMA=aegira (snake_case, mirip customer + loan application)",
+                  "value": {
+                    "applicant": {
+                      "full_name": "Budi Santoso",
+                      "phone_number": "08123456789"
+                    },
+                    "financial": {
+                      "monthly_income": 8500000,
+                      "monthly_expense": 0,
+                      "existing_installment": 2200000,
+                      "requested_amount": 40000000,
+                      "requested_tenure": 12,
+                      "loan_purpose": "Home renovation"
+                    },
+                    "credit_profile": {
+                      "payment_history": "baik"
+                    }
+                  }
+                },
+                "kreditku": {
+                  "summary": "VITE_SCORING_SCHEMA=kreditku (camelCase legacy)",
                   "value": {
                     "applicant": {
                       "fullName": "Budi Santoso",
@@ -51,13 +76,41 @@
         },
         "responses": {
           "200": {
-            "description": "Scoring berhasil",
+            "description": "Scoring berhasil. Frontend menerima **camelCase** setelah normalisasi; wire JSON boleh snake_case (trace_id, calculation.current_dsr, …).",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/CreditScoringEnvelope" },
+                "schema": { "$ref": "#/components/schemas/CreditScoringResponseEnvelope" },
                 "examples": {
-                  "sample": {
-                    "summary": "Response yang diharapkan frontend",
+                  "aegira_style": {
+                    "summary": "Wire JSON snake_case + blok DSR (Aegira-style)",
+                    "value": {
+                      "trace_id": "uat-1714275000000-ab12cd",
+                      "evaluated_at": "2026-04-28T02:00:00.000Z",
+                      "calculation": {
+                        "current_dsr": 25.88,
+                        "projected_dsr": 32.94,
+                        "monthly_installment": 3333333
+                      },
+                      "eligibility": {
+                        "risk_level": "MEDIUM",
+                        "eligible": true
+                      },
+                      "result": {
+                        "kolektibilitas": 2,
+                        "kolektibilitas_label": "Dalam Perhatian Khusus",
+                        "internal_score": 74,
+                        "breakdown": {
+                          "payment_history": 82,
+                          "income": 78,
+                          "debt_to_income": 68,
+                          "dti_ratio": 25.9
+                        },
+                        "recommendation": "Cukup baik: dapat diproses dengan monitoring dan verifikasi lanjutan."
+                      }
+                    }
+                  },
+                  "kreditku_style": {
+                    "summary": "Wire JSON camelCase (legacy)",
                     "value": {
                       "traceId": "uat-1714275000000-ab12cd",
                       "evaluatedAt": "2026-04-28T02:00:00.000Z",
@@ -101,29 +154,72 @@
   },
   "components": {
     "schemas": {
-      "CreditScoringRequest": {
+      "CreditScoringRequestAegira": {
         "type": "object",
+        "description": "Gunakan saat `VITE_SCORING_SCHEMA=aegira`. Field mengacu pola JSON snake_case Aegira (customer / loan application).",
+        "required": ["applicant", "financial", "credit_profile"],
+        "properties": {
+          "applicant": {
+            "type": "object",
+            "required": ["full_name", "phone_number"],
+            "properties": {
+              "full_name": { "type": "string" },
+              "phone_number": { "type": "string" }
+            }
+          },
+          "financial": {
+            "type": "object",
+            "required": [
+              "monthly_income",
+              "existing_installment",
+              "requested_amount",
+              "requested_tenure",
+              "loan_purpose"
+            ],
+            "properties": {
+              "monthly_income": { "type": "number", "minimum": 0 },
+              "monthly_expense": { "type": "number", "minimum": 0, "default": 0 },
+              "existing_installment": { "type": "number", "minimum": 0, "description": "Cicilan/utang bulanan existing (setara existing_installment di Aegira)" },
+              "requested_amount": { "type": "number", "minimum": 0 },
+              "requested_tenure": { "type": "integer", "minimum": 1, "description": "Tenor pinjaman (bulan); default frontend dari `VITE_SCORING_DEFAULT_TENURE`" },
+              "loan_purpose": { "type": "string", "description": "Teks tujuan (mis. Home renovation), dipetakan dari form demo" }
+            }
+          },
+          "credit_profile": {
+            "type": "object",
+            "required": ["payment_history"],
+            "properties": {
+              "payment_history": {
+                "type": "string",
+                "enum": ["sangat_baik", "baik", "cukup", "buruk"]
+              }
+            }
+          }
+        }
+      },
+      "CreditScoringRequestKreditku": {
+        "type": "object",
+        "description": "Gunakan saat `VITE_SCORING_SCHEMA=kreditku` (legacy).",
         "required": ["applicant", "financial", "creditProfile"],
         "properties": {
           "applicant": {
             "type": "object",
             "required": ["fullName", "phone"],
             "properties": {
-              "fullName": { "type": "string", "example": "Budi Santoso" },
-              "phone": { "type": "string", "example": "08123456789" }
+              "fullName": { "type": "string" },
+              "phone": { "type": "string" }
             }
           },
           "financial": {
             "type": "object",
             "required": ["monthlyIncome", "monthlyDebt", "requestedLoanAmount", "purpose"],
             "properties": {
-              "monthlyIncome": { "type": "number", "minimum": 0, "description": "Penghasilan bulanan (IDR)" },
-              "monthlyDebt": { "type": "number", "minimum": 0, "description": "Total cicilan/utang bulanan (IDR)" },
-              "requestedLoanAmount": { "type": "number", "minimum": 0, "description": "Plafon diajukan (IDR)" },
+              "monthlyIncome": { "type": "number", "minimum": 0 },
+              "monthlyDebt": { "type": "number", "minimum": 0 },
+              "requestedLoanAmount": { "type": "number", "minimum": 0 },
               "purpose": {
                 "type": "string",
-                "enum": ["modal_kerja", "pendidikan", "renovasi", "lainnya"],
-                "description": "Tujuan pinjaman (nilai dari form frontend)"
+                "enum": ["modal_kerja", "pendidikan", "renovasi", "lainnya"]
               }
             }
           },
@@ -133,55 +229,69 @@
             "properties": {
               "paymentHistory": {
                 "type": "string",
-                "enum": ["sangat_baik", "baik", "cukup", "buruk"],
-                "description": "Riwayat pembayaran (self-report di demo)"
+                "enum": ["sangat_baik", "baik", "cukup", "buruk"]
               }
             }
           }
         }
       },
-      "ScoreBreakdown": {
+      "ScoreBreakdownWire": {
         "type": "object",
-        "required": ["paymentHistory", "income", "debtToIncome"],
+        "description": "Breakdown skor 0–100; boleh camelCase atau snake_case.",
         "properties": {
           "paymentHistory": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "payment_history": { "type": "integer", "minimum": 0, "maximum": 100 },
           "income": { "type": "integer", "minimum": 0, "maximum": 100 },
           "debtToIncome": { "type": "integer", "minimum": 0, "maximum": 100 },
-          "dtiRatio": {
-            "type": ["number", "null"],
-            "description": "Persen cicilan terhadap penghasilan; null jika penghasilan 0"
-          }
+          "debt_to_income": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "dtiRatio": { "type": ["number", "null"] },
+          "dti_ratio": { "type": ["number", "null"] }
         }
       },
-      "ScoreResult": {
+      "ScoreResultWire": {
         "type": "object",
-        "required": [
-          "kolektibilitas",
-          "kolektibilitasLabel",
-          "internalScore",
-          "breakdown",
-          "recommendation"
-        ],
         "properties": {
-          "kolektibilitas": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 5,
-            "description": "Simulasi kolektibilitas (edukasi)"
-          },
+          "kolektibilitas": { "type": "integer", "minimum": 1, "maximum": 5 },
           "kolektibilitasLabel": { "type": "string" },
+          "kolektibilitas_label": { "type": "string" },
           "internalScore": { "type": "integer", "minimum": 0, "maximum": 100 },
-          "breakdown": { "$ref": "#/components/schemas/ScoreBreakdown" },
+          "internal_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "breakdown": { "$ref": "#/components/schemas/ScoreBreakdownWire" },
           "recommendation": { "type": "string" }
         }
       },
-      "CreditScoringEnvelope": {
+      "CalculationBlock": {
         "type": "object",
-        "required": ["traceId", "evaluatedAt", "result"],
+        "description": "Sejalan ringkasan DSR di README Aegira (current vs projected).",
         "properties": {
+          "current_dsr": { "type": "number" },
+          "currentDsr": { "type": "number" },
+          "projected_dsr": { "type": "number" },
+          "projectedDsr": { "type": "number" },
+          "monthly_installment": { "type": "number", "description": "Estimasi cicilan pinjaman baru per bulan (jika backend menyediakan)" },
+          "monthlyInstallment": { "type": "number" }
+        }
+      },
+      "EligibilityBlock": {
+        "type": "object",
+        "properties": {
+          "risk_level": { "type": "string", "description": "Mis. LOW, MEDIUM, HIGH" },
+          "riskLevel": { "type": "string" },
+          "eligible": { "type": "boolean" }
+        }
+      },
+      "CreditScoringResponseEnvelope": {
+        "type": "object",
+        "description": "Envelope response; field audit boleh snake_case atau camelCase.",
+        "properties": {
+          "data": { "type": "object", "description": "Opsional: wrapper Spring-style" },
+          "trace_id": { "type": "string" },
           "traceId": { "type": "string" },
+          "evaluated_at": { "type": "string", "format": "date-time" },
           "evaluatedAt": { "type": "string", "format": "date-time" },
-          "result": { "$ref": "#/components/schemas/ScoreResult" }
+          "calculation": { "$ref": "#/components/schemas/CalculationBlock" },
+          "eligibility": { "$ref": "#/components/schemas/EligibilityBlock" },
+          "result": { "$ref": "#/components/schemas/ScoreResultWire" }
         }
       },
       "ErrorResponse": {
@@ -189,6 +299,7 @@
         "properties": {
           "error": { "type": "string" },
           "message": { "type": "string" },
+          "trace_id": { "type": "string" },
           "traceId": { "type": "string" }
         }
       }

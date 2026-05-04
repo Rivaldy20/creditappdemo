@@ -72,6 +72,51 @@ export function renderHasilScoring(applicant, scoreResult) {
         <div class="score-label">${esc(r.kolektibilitasLabel)}</div>
         <p class="hint" style="margin-top:0.35rem;">Indeks risiko internal: <strong style="color:var(--text);">${r.internalScore}</strong> / 100</p>
       </div>
+      ${
+        r.aegira &&
+        (r.aegira.currentDsr != null ||
+          r.aegira.projectedDsr != null ||
+          r.aegira.riskLevel != null ||
+          r.aegira.monthlyInstallment != null)
+          ? `
+      <div class="card" style="margin-top:0.75rem;background:var(--bg);padding:0.85rem;">
+        <strong style="font-size:0.9rem;">Referensi backend (DSR &amp; risiko)</strong>
+        <p class="hint" style="margin:0.25rem 0 0.5rem;">
+          Pola data selaras ringkasan perhitungan / eligibility seperti
+          <a href="https://github.com/khalidalhabibie/aegira-loan-service/blob/master/README.md" target="_blank" rel="noopener noreferrer">Aegira Loan Service</a>
+          (snake_case di API; angka di bawah sudah dinormalisasi untuk UI).
+        </p>
+        <div class="score-detail" style="margin-top:0;">
+          ${
+            r.aegira.currentDsr != null
+              ? `<div class="score-row"><span>Current DSR</span><span><strong>${esc(String(r.aegira.currentDsr))}</strong>%</span></div>`
+              : ''
+          }
+          ${
+            r.aegira.projectedDsr != null
+              ? `<div class="score-row"><span>Projected DSR</span><span><strong>${esc(String(r.aegira.projectedDsr))}</strong>%</span></div>`
+              : ''
+          }
+          ${
+            r.aegira.monthlyInstallment != null
+              ? `<div class="score-row"><span>Est. cicilan baru / bulan</span><span><strong>${esc(String(r.aegira.monthlyInstallment))}</strong> Rp</span></div>`
+              : ''
+          }
+          ${
+            r.aegira.riskLevel != null
+              ? `<div class="score-row"><span>Risk level</span><span><strong>${esc(r.aegira.riskLevel)}</strong></span></div>`
+              : ''
+          }
+          ${
+            r.aegira.eligible != null
+              ? `<div class="score-row"><span>Eligible (backend)</span><span><strong>${r.aegira.eligible ? 'Ya' : 'Tidak'}</strong></span></div>`
+              : ''
+          }
+        </div>
+      </div>
+      `
+          : ''
+      }
       <div class="score-detail">
         <div>
           <div class="score-row">

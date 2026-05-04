@@ -2,7 +2,7 @@
 
 ## API
 
-- **Markdown ringkas:** [`api/credit-scoring.md`](api/credit-scoring.md)
+- **Markdown ringkas:** [`api/credit-scoring.md`](api/credit-scoring.md) — termasuk skema **`aegira`** (snake_case, DSR/eligibility) vs **`kreditku`** (legacy), selaras referensi [Aegira Loan Service](https://github.com/khalidalhabibie/aegira-loan-service/blob/master/README.md).
 - **OpenAPI 3 (JSON):** [`api/credit-scoring.openapi.json`](api/credit-scoring.openapi.json)
 
 ## Visualisasi UI (screenshot per halaman)
